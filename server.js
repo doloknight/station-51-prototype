@@ -33,6 +33,30 @@ class Game {
     this.timeLimit = 300; // 5 minutes
     this.level = this.generateLevel();
     this.lastUpdate = Date.now();
+    
+    // Initialize fire truck PL 511
+    this.fireTruck = {
+      x: 100,
+      y: 500,
+      waterLevel: 2000, // gallons
+      maxWater: 2000,
+      pumpRunning: false,
+      waterPressure: 0,
+      hoseConnections: [
+        { occupied: false, playerId: null },
+        { occupied: false, playerId: null },
+        { occupied: false, playerId: null },
+        { occupied: false, playerId: null }
+      ]
+    };
+    
+    // Initialize hydrant
+    this.hydrant = {
+      x: 200,
+      y: 300,
+      connected: false,
+      waterPressure: 100 // PSI
+    };
   }
 
   addPlayer(playerId, socket) {
@@ -50,7 +74,16 @@ class Game {
       role: availableRoles[0] || 'axe',
       health: 100,
       water: 100,
-      isAlive: true
+      isAlive: true,
+      hose: {
+        connected: false,
+        connectionPoint: null,
+        connectionType: null, // 'truck' or 'hydrant'
+        segments: [],
+        maxLength: 300, // feet (converted to pixels: ~1200px)
+        strained: false,
+        waterPressure: 0
+      }
     };
     
     this.players.set(playerId, player);
@@ -209,13 +242,16 @@ class Game {
         role: p.role,
         health: p.health,
         water: p.water,
-        isAlive: p.isAlive
+        isAlive: p.isAlive,
+        hose: p.hose
       })),
       fire: this.fire.getState(),
       civilians: this.civilians,
       structuralIntegrity: this.structuralIntegrity,
       waterSupply: this.waterSupply,
       level: this.level,
+      fireTruck: this.fireTruck,
+      hydrant: this.hydrant,
       timeRemaining: this.startTime ? Math.max(0, this.timeLimit - (Date.now() - this.startTime) / 1000) : this.timeLimit
     };
   }
@@ -447,6 +483,152 @@ io.on('connection', (socket) => {
       civilian.rescued = true;
       game.broadcast('civilianRescued', { civilianId });
     }
+  });
+  
+  socket.on('toggleHoseConnection', (data) => {
+    const playerInfo = players.get(socket.id);
+    if (!playerInfo) return;
+    
+    const game = games.get(playerInfo.gameId);
+    if (!game || game.state !== 'playing') return;
+    
+    const player = game.players.get(socket.id);
+    if (!player) return;
+    
+    if (player.hose.connected) {
+      // Disconnect hose
+      player.hose.connected = false;
+      player.hose.connectionPoint = null;
+      player.hose.connectionType = null;
+      player.hose.segments = [];
+      player.hose.waterPressure = 0;
+      
+      // Free up connection point
+      if (player.hose.connectionType === 'truck') {
+        const connection = game.fireTruck.hoseConnections.find(c => c.playerId === socket.id);
+        if (connection) {
+          connection.occupied = false;
+          connection.playerId = null;
+        }
+      }
+    } else {
+      // Try to connect to nearest fire truck or hydrant
+      const connectionDistance = 50;
+      
+      // Check fire truck connections
+      const truckDistance = Math.sqrt(
+        Math.pow(player.x - game.fireTruck.x, 2) + 
+        Math.pow(player.y - game.fireTruck.y, 2)
+      );
+      
+      if (truckDistance < connectionDistance) {
+        const availableConnection = game.fireTruck.hoseConnections.find(c => !c.occupied);
+        if (availableConnection) {
+          player.hose.connected = true;
+          player.hose.connectionPoint = { x: game.fireTruck.x + 30, y: game.fireTruck.y + 20 };
+          player.hose.connectionType = 'truck';
+          player.hose.segments = [{ x: player.x, y: player.y }];
+          availableConnection.occupied = true;
+          availableConnection.playerId = socket.id;
+        }
+      } else {
+        // Check hydrant connection
+        const hydrantDistance = Math.sqrt(
+          Math.pow(player.x - game.hydrant.x, 2) + 
+          Math.pow(player.y - game.hydrant.y, 2)
+        );
+        
+        if (hydrantDistance < connectionDistance) {
+          player.hose.connected = true;
+          player.hose.connectionPoint = { x: game.hydrant.x, y: game.hydrant.y };
+          player.hose.connectionType = 'hydrant';
+          player.hose.segments = [{ x: player.x, y: player.y }];
+          game.hydrant.connected = true;
+        }
+      }
+    }
+    
+    game.broadcast('hoseConnectionToggled', {
+      playerId: socket.id,
+      connected: player.hose.connected,
+      connectionType: player.hose.connectionType
+    });
+  });
+  
+  socket.on('extendHose', (data) => {
+    const playerInfo = players.get(socket.id);
+    if (!playerInfo) return;
+    
+    const game = games.get(playerInfo.gameId);
+    if (!game || game.state !== 'playing') return;
+    
+    const player = game.players.get(socket.id);
+    if (!player || !player.hose.connected) return;
+    
+    const { x, y } = data;
+    
+    // Add new hose segment at current position
+    player.hose.segments.push({ x, y });
+    
+    // Limit number of segments (for performance)
+    if (player.hose.segments.length > 20) {
+      player.hose.segments.shift();
+    }
+    
+    game.broadcast('hoseExtended', {
+      playerId: socket.id,
+      segments: player.hose.segments
+    });
+  });
+  
+  socket.on('retractHose', (data) => {
+    const playerInfo = players.get(socket.id);
+    if (!playerInfo) return;
+    
+    const game = games.get(playerInfo.gameId);
+    if (!game || game.state !== 'playing') return;
+    
+    const player = game.players.get(socket.id);
+    if (!player || !player.hose.connected) return;
+    
+    // Remove last segment
+    if (player.hose.segments.length > 1) {
+      player.hose.segments.pop();
+    }
+    
+    game.broadcast('hoseRetracted', {
+      playerId: socket.id,
+      segments: player.hose.segments
+    });
+  });
+  
+  socket.on('refillWater', (data) => {
+    const playerInfo = players.get(socket.id);
+    if (!playerInfo) return;
+    
+    const game = games.get(playerInfo.gameId);
+    if (!game || game.state !== 'playing') return;
+    
+    const player = game.players.get(socket.id);
+    if (!player) return;
+    
+    // Refill water from connected source
+    if (player.hose.connected && player.hose.connectionType === 'truck') {
+      if (game.fireTruck.waterLevel > 0) {
+        const refillAmount = Math.min(20, 100 - player.water, game.fireTruck.waterLevel);
+        player.water += refillAmount;
+        game.fireTruck.waterLevel -= refillAmount;
+      }
+    } else if (player.hose.connected && player.hose.connectionType === 'hydrant') {
+      // Hydrant has unlimited water
+      player.water = 100;
+    }
+    
+    game.broadcast('waterRefilled', {
+      playerId: socket.id,
+      waterLevel: player.water,
+      truckWaterLevel: game.fireTruck.waterLevel
+    });
   });
   
   socket.on('disconnect', () => {

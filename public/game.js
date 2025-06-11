@@ -102,6 +102,18 @@ class Game {
             if (e.code === 'KeyR') {
                 this.tryRefillWater();
             }
+            
+            if (e.code === 'KeyH') {
+                this.toggleHoseConnection();
+            }
+            
+            if (e.code === 'KeyE') {
+                this.extendHose();
+            }
+            
+            if (e.code === 'KeyQ') {
+                this.retractHose();
+            }
         });
         
         document.addEventListener('keyup', (e) => {
@@ -168,17 +180,141 @@ class Game {
                 dy *= 0.707;
             }
             
-            const newX = player.x + dx * speed * (1/60); // Assume 60 FPS
-            const newY = player.y + dy * speed * (1/60);
+            const deltaTime = 1/60; // Assume 60 FPS
+            const newX = player.x + dx * speed * deltaTime;
+            const newY = player.y + dy * speed * deltaTime;
             
-            // Simple bounds checking
-            const boundedX = Math.max(20, Math.min(780, newX));
-            const boundedY = Math.max(20, Math.min(580, newY));
+            // Check collisions and hose constraints
+            const validPosition = this.checkCollisions(player, newX, newY);
             
-            if (boundedX !== player.x || boundedY !== player.y) {
-                this.socket.emit('playerMove', { x: boundedX, y: boundedY });
+            if (validPosition.x !== player.x || validPosition.y !== player.y) {
+                this.socket.emit('playerMove', { 
+                    x: validPosition.x, 
+                    y: validPosition.y,
+                    hoseStrained: validPosition.hoseStrained 
+                });
             }
         }
+    }
+    
+    checkCollisions(player, newX, newY) {
+        const playerRadius = 8;
+        let finalX = newX;
+        let finalY = newY;
+        let hoseStrained = false;
+        
+        // World bounds checking
+        finalX = Math.max(playerRadius, Math.min(800 - playerRadius, finalX));
+        finalY = Math.max(playerRadius, Math.min(600 - playerRadius, finalY));
+        
+        // Level collision detection
+        if (this.gameState.level) {
+            const tileSize = 20;
+            const leftTile = Math.floor((finalX - playerRadius) / tileSize);
+            const rightTile = Math.floor((finalX + playerRadius) / tileSize);
+            const topTile = Math.floor((finalY - playerRadius) / tileSize);
+            const bottomTile = Math.floor((finalY + playerRadius) / tileSize);
+            
+            for (let y = topTile; y <= bottomTile; y++) {
+                for (let x = leftTile; x <= rightTile; x++) {
+                    if (this.gameState.level.tiles[y] && this.gameState.level.tiles[y][x]) {
+                        const tile = this.gameState.level.tiles[y][x];
+                        if (!tile.passable) {
+                            // Wall collision - push player back
+                            const tileLeft = x * tileSize;
+                            const tileRight = (x + 1) * tileSize;
+                            const tileTop = y * tileSize;
+                            const tileBottom = (y + 1) * tileSize;
+                            
+                            if (finalX + playerRadius > tileLeft && finalX - playerRadius < tileRight &&
+                                finalY + playerRadius > tileTop && finalY - playerRadius < tileBottom) {
+                                // Simple collision resolution - push back to previous position
+                                finalX = player.x;
+                                finalY = player.y;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Hose constraint checking
+        if (player.hose && player.hose.connected) {
+            const hoseConstraint = this.checkHoseConstraints(player, finalX, finalY);
+            finalX = hoseConstraint.x;
+            finalY = hoseConstraint.y;
+            hoseStrained = hoseConstraint.strained;
+        }
+        
+        // Player-to-player collision
+        if (this.gameState.players) {
+            this.gameState.players.forEach(otherPlayer => {
+                if (otherPlayer.id !== player.id) {
+                    const distance = Math.sqrt(
+                        Math.pow(finalX - otherPlayer.x, 2) + 
+                        Math.pow(finalY - otherPlayer.y, 2)
+                    );
+                    if (distance < playerRadius * 2) {
+                        // Simple separation
+                        const angle = Math.atan2(finalY - otherPlayer.y, finalX - otherPlayer.x);
+                        finalX = otherPlayer.x + Math.cos(angle) * playerRadius * 2;
+                        finalY = otherPlayer.y + Math.sin(angle) * playerRadius * 2;
+                    }
+                }
+            });
+        }
+        
+        return { x: finalX, y: finalY, hoseStrained };
+    }
+    
+    checkHoseConstraints(player, newX, newY) {
+        if (!player.hose || !player.hose.connected) {
+            return { x: newX, y: newY, strained: false };
+        }
+        
+        const hose = player.hose;
+        const connectionPoint = hose.connectionPoint;
+        
+        // Calculate total hose length used
+        let totalLength = 0;
+        let currentX = connectionPoint.x;
+        let currentY = connectionPoint.y;
+        
+        // Add length of deployed hose segments
+        for (let i = 0; i < hose.segments.length; i++) {
+            const segment = hose.segments[i];
+            const segmentLength = Math.sqrt(
+                Math.pow(segment.x - currentX, 2) + 
+                Math.pow(segment.y - currentY, 2)
+            );
+            totalLength += segmentLength;
+            currentX = segment.x;
+            currentY = segment.y;
+        }
+        
+        // Add length from last segment to player position
+        const remainingLength = Math.sqrt(
+            Math.pow(newX - currentX, 2) + 
+            Math.pow(newY - currentY, 2)
+        );
+        
+        const totalRequiredLength = totalLength + remainingLength;
+        
+        if (totalRequiredLength > hose.maxLength) {
+            // Constrain player to maximum hose reach
+            const maxRemainingLength = hose.maxLength - totalLength;
+            if (maxRemainingLength <= 0) {
+                return { x: player.x, y: player.y, strained: true };
+            }
+            
+            const angle = Math.atan2(newY - currentY, newX - currentX);
+            const constrainedX = currentX + Math.cos(angle) * maxRemainingLength;
+            const constrainedY = currentY + Math.sin(angle) * maxRemainingLength;
+            
+            return { x: constrainedX, y: constrainedY, strained: true };
+        }
+        
+        return { x: newX, y: newY, strained: false };
     }
     
     sprayWater() {
@@ -230,9 +366,66 @@ class Game {
         const player = this.gameState.players.find(p => p.id === this.playerId);
         if (!player) return;
         
-        // Check if near hydrant (simplified - would need proper level collision)
-        console.log('Trying to refill water...');
-        // This would be implemented with proper hydrant collision detection
+        // Check if near hydrant or fire truck
+        const refillDistance = 40;
+        let canRefill = false;
+        
+        // Check hydrant
+        if (this.gameState.hydrant) {
+            const distance = Math.sqrt(
+                Math.pow(player.x - this.gameState.hydrant.x, 2) + 
+                Math.pow(player.y - this.gameState.hydrant.y, 2)
+            );
+            if (distance < refillDistance) {
+                canRefill = true;
+            }
+        }
+        
+        // Check fire truck
+        if (this.gameState.fireTruck) {
+            const distance = Math.sqrt(
+                Math.pow(player.x - this.gameState.fireTruck.x, 2) + 
+                Math.pow(player.y - this.gameState.fireTruck.y, 2)
+            );
+            if (distance < refillDistance) {
+                canRefill = true;
+            }
+        }
+        
+        if (canRefill) {
+            this.socket.emit('refillWater', { playerId: this.playerId });
+        }
+    }
+    
+    toggleHoseConnection() {
+        if (!this.gameState || !this.playerId) return;
+        
+        const player = this.gameState.players.find(p => p.id === this.playerId);
+        if (!player) return;
+        
+        this.socket.emit('toggleHoseConnection', { playerId: this.playerId });
+    }
+    
+    extendHose() {
+        if (!this.gameState || !this.playerId) return;
+        
+        const player = this.gameState.players.find(p => p.id === this.playerId);
+        if (!player || !player.hose || !player.hose.connected) return;
+        
+        this.socket.emit('extendHose', { 
+            playerId: this.playerId,
+            x: player.x,
+            y: player.y
+        });
+    }
+    
+    retractHose() {
+        if (!this.gameState || !this.playerId) return;
+        
+        const player = this.gameState.players.find(p => p.id === this.playerId);
+        if (!player || !player.hose || !player.hose.connected) return;
+        
+        this.socket.emit('retractHose', { playerId: this.playerId });
     }
     
     addWaterSprayEffect(data) {
@@ -277,6 +470,9 @@ class Game {
         
         if (this.gameState) {
             this.renderLevel();
+            this.renderFireTruck();
+            this.renderHydrant();
+            this.renderHoses();
             this.renderFire();
             this.renderCivilians();
             this.renderPlayers();
@@ -315,15 +511,165 @@ class Game {
                         this.ctx.fillStyle = '#444';
                         this.ctx.fillRect(screenX, screenY, tileSize, tileSize);
                         break;
-                    case 'hydrant':
-                        this.ctx.fillStyle = '#444';
-                        this.ctx.fillRect(screenX, screenY, tileSize, tileSize);
-                        this.ctx.fillStyle = '#4444ff';
-                        this.ctx.fillRect(screenX + 4, screenY + 4, tileSize - 8, tileSize - 8);
-                        break;
                 }
             }
         }
+    }
+    
+    renderFireTruck() {
+        if (!this.gameState.fireTruck) return;
+        
+        const truck = this.gameState.fireTruck;
+        const screenX = truck.x - this.camera.x;
+        const screenY = truck.y - this.camera.y;
+        
+        // Fire truck body (PL 511)
+        this.ctx.fillStyle = '#cc0000';
+        this.ctx.fillRect(screenX - 40, screenY - 20, 80, 40);
+        
+        // Truck details
+        this.ctx.fillStyle = '#990000';
+        this.ctx.fillRect(screenX - 35, screenY - 15, 70, 30);
+        
+        // Cab
+        this.ctx.fillStyle = '#cc0000';
+        this.ctx.fillRect(screenX - 40, screenY - 20, 25, 40);
+        
+        // Water tank
+        this.ctx.fillStyle = '#888';
+        this.ctx.fillRect(screenX - 10, screenY - 15, 45, 30);
+        
+        // Pump controls
+        this.ctx.fillStyle = '#ffff00';
+        this.ctx.fillRect(screenX + 20, screenY - 5, 10, 10);
+        
+        // Text label
+        this.ctx.fillStyle = 'white';
+        this.ctx.font = '12px monospace';
+        this.ctx.textAlign = 'center';
+        this.ctx.fillText('PL 511', screenX, screenY - 25);
+        
+        // Water level indicator
+        const waterPercent = truck.waterLevel / truck.maxWater;
+        this.ctx.fillStyle = waterPercent > 0.3 ? '#4444ff' : '#ff4444';
+        this.ctx.fillRect(screenX - 8, screenY - 13, 41 * waterPercent, 26);
+        
+        // Hose connections
+        truck.hoseConnections.forEach((connection, index) => {
+            const connX = screenX + 30 + (index * 8);
+            const connY = screenY + 18;
+            
+            this.ctx.fillStyle = connection.occupied ? '#00ff00' : '#666';
+            this.ctx.fillRect(connX, connY, 6, 6);
+        });
+    }
+    
+    renderHydrant() {
+        if (!this.gameState.hydrant) return;
+        
+        const hydrant = this.gameState.hydrant;
+        const screenX = hydrant.x - this.camera.x;
+        const screenY = hydrant.y - this.camera.y;
+        
+        // Hydrant base
+        this.ctx.fillStyle = '#666';
+        this.ctx.fillRect(screenX - 8, screenY - 8, 16, 16);
+        
+        // Hydrant body
+        this.ctx.fillStyle = '#ff4444';
+        this.ctx.fillRect(screenX - 6, screenY - 12, 12, 20);
+        
+        // Hydrant cap
+        this.ctx.fillStyle = '#ffff00';
+        this.ctx.fillRect(screenX - 4, screenY - 14, 8, 4);
+        
+        // Connection ports
+        this.ctx.fillStyle = hydrant.connected ? '#00ff00' : '#666';
+        this.ctx.fillRect(screenX - 8, screenY - 2, 4, 4);
+        this.ctx.fillRect(screenX + 4, screenY - 2, 4, 4);
+    }
+    
+    renderHoses() {
+        if (!this.gameState.players) return;
+        
+        this.gameState.players.forEach(player => {
+            if (player.hose && player.hose.connected) {
+                this.renderPlayerHose(player);
+            }
+        });
+    }
+    
+    renderPlayerHose(player) {
+        const hose = player.hose;
+        const connectionPoint = hose.connectionPoint;
+        
+        // Draw hose segments
+        this.ctx.strokeStyle = hose.strained ? '#ff4444' : '#333';
+        this.ctx.lineWidth = 4;
+        this.ctx.lineCap = 'round';
+        
+        this.ctx.beginPath();
+        
+        let currentX = connectionPoint.x - this.camera.x;
+        let currentY = connectionPoint.y - this.camera.y;
+        
+        this.ctx.moveTo(currentX, currentY);
+        
+        // Draw through all segments
+        hose.segments.forEach(segment => {
+            const segX = segment.x - this.camera.x;
+            const segY = segment.y - this.camera.y;
+            this.ctx.lineTo(segX, segY);
+            currentX = segX;
+            currentY = segY;
+        });
+        
+        // Draw to player position
+        const playerX = player.x - this.camera.x;
+        const playerY = player.y - this.camera.y;
+        this.ctx.lineTo(playerX, playerY);
+        
+        this.ctx.stroke();
+        
+        // Draw segment markers
+        this.ctx.fillStyle = '#666';
+        hose.segments.forEach(segment => {
+            const segX = segment.x - this.camera.x;
+            const segY = segment.y - this.camera.y;
+            this.ctx.fillRect(segX - 2, segY - 2, 4, 4);
+        });
+        
+        // Draw connection point
+        this.ctx.fillStyle = '#ffff00';
+        this.ctx.fillRect(currentX - 3, currentY - 3, 6, 6);
+        
+        // Show hose length indicator
+        const totalLength = this.calculateHoseLength(hose);
+        const lengthPercent = totalLength / hose.maxLength;
+        const color = lengthPercent > 0.9 ? '#ff4444' : lengthPercent > 0.7 ? '#ffff00' : '#00ff00';
+        
+        this.ctx.fillStyle = color;
+        this.ctx.font = '10px monospace';
+        this.ctx.textAlign = 'left';
+        this.ctx.fillText(`${Math.round(totalLength)}/${hose.maxLength}ft`, playerX + 10, playerY - 10);
+    }
+    
+    calculateHoseLength(hose) {
+        let totalLength = 0;
+        let currentX = hose.connectionPoint.x;
+        let currentY = hose.connectionPoint.y;
+        
+        hose.segments.forEach(segment => {
+            const segmentLength = Math.sqrt(
+                Math.pow(segment.x - currentX, 2) + 
+                Math.pow(segment.y - currentY, 2)
+            );
+            totalLength += segmentLength / 4; // Convert pixels to feet (rough conversion)
+            currentX = segment.x;
+            currentY = segment.y;
+        });
+        
+        return totalLength;
     }
     
     renderFire() {
