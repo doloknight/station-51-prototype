@@ -166,6 +166,9 @@ class Game {
         const deltaTime = (now - this.lastUpdate) / 1000;
         this.lastUpdate = now;
         
+        // Limit update frequency for better performance
+        if (deltaTime < 1/30) return; // Max 30 FPS updates
+        
         // Handle movement
         this.handleMovement();
         
@@ -694,36 +697,36 @@ class Game {
         
         const tileSize = 20;
         
-        this.gameState.fire.forEach((row, y) => {
-            row.forEach((cell, x) => {
+        // Performance optimization: only render visible fire cells
+        const startX = Math.max(0, Math.floor(this.camera.x / tileSize) - 1);
+        const endX = Math.min(this.gameState.fire[0].length - 1, Math.floor((this.camera.x + this.canvas.width) / tileSize) + 1);
+        const startY = Math.max(0, Math.floor(this.camera.y / tileSize) - 1);
+        const endY = Math.min(this.gameState.fire.length - 1, Math.floor((this.camera.y + this.canvas.height) / tileSize) + 1);
+        
+        for (let y = startY; y <= endY; y++) {
+            for (let x = startX; x <= endX; x++) {
+                const cell = this.gameState.fire[y][x];
                 if (cell.intensity > 0.1) {
                     const screenX = x * tileSize - this.camera.x;
                     const screenY = y * tileSize - this.camera.y;
                     
-                    // Skip rendering if off-screen
-                    if (screenX < -tileSize || screenX > this.canvas.width || 
-                        screenY < -tileSize || screenY > this.canvas.height) {
-                        return;
-                    }
-                    
-                    // Fire color based on intensity
+                    // Simplified fire rendering for performance
                     const intensity = Math.min(1, cell.intensity);
                     const red = Math.floor(255 * intensity);
-                    const green = Math.floor(100 * intensity);
-                    const alpha = 0.3 + 0.7 * intensity;
+                    const green = Math.floor(80 * intensity);
+                    const alpha = 0.4 + 0.6 * intensity;
                     
                     this.ctx.fillStyle = `rgba(${red}, ${green}, 0, ${alpha})`;
                     this.ctx.fillRect(screenX, screenY, tileSize, tileSize);
                     
-                    // Add flickering effect
-                    if (Math.random() < intensity * 0.3) {
-                        this.ctx.fillStyle = `rgba(255, 150, 0, ${alpha * 0.5})`;
-                        this.ctx.fillRect(screenX + Math.random() * 10 - 5, screenY + Math.random() * 10 - 5, 
-                                        tileSize/2, tileSize/2);
+                    // Reduced flickering effect for performance
+                    if (intensity > 0.5 && (x + y + Math.floor(Date.now() / 200)) % 4 === 0) {
+                        this.ctx.fillStyle = `rgba(255, 120, 0, ${alpha * 0.4})`;
+                        this.ctx.fillRect(screenX + 2, screenY + 2, tileSize - 4, tileSize - 4);
                     }
                 }
-            });
-        });
+            }
+        }
     }
     
     renderCivilians() {
@@ -822,30 +825,33 @@ class Game {
     }
     
     renderWaterSprayEffects() {
-        this.waterSprayEffects.forEach(effect => {
+        // Limit to maximum 10 effects for performance
+        const maxEffects = 10;
+        const effects = this.waterSprayEffects.slice(-maxEffects);
+        
+        effects.forEach(effect => {
             const alpha = effect.lifetime / effect.maxLifetime;
             const screenStartX = effect.startX - this.camera.x;
             const screenStartY = effect.startY - this.camera.y;
             const screenEndX = effect.endX - this.camera.x;
             const screenEndY = effect.endY - this.camera.y;
             
-            this.ctx.strokeStyle = `rgba(100, 150, 255, ${alpha * 0.8})`;
-            this.ctx.lineWidth = 6;
-            this.ctx.beginPath();
-            this.ctx.moveTo(screenStartX, screenStartY);
-            this.ctx.lineTo(screenEndX, screenEndY);
-            this.ctx.stroke();
-            
-            // Water droplets
-            for (let i = 0; i < 5; i++) {
-                const t = i / 4;
-                const x = screenStartX + (screenEndX - screenStartX) * t + (Math.random() - 0.5) * 20;
-                const y = screenStartY + (screenEndY - screenStartY) * t + (Math.random() - 0.5) * 20;
+            // Only render if on screen
+            if (screenStartX > -50 && screenStartX < this.canvas.width + 50 && 
+                screenStartY > -50 && screenStartY < this.canvas.height + 50) {
                 
-                this.ctx.fillStyle = `rgba(150, 200, 255, ${alpha * 0.6})`;
+                this.ctx.strokeStyle = `rgba(100, 150, 255, ${alpha * 0.7})`;
+                this.ctx.lineWidth = 4;
                 this.ctx.beginPath();
-                this.ctx.arc(x, y, 2, 0, Math.PI * 2);
-                this.ctx.fill();
+                this.ctx.moveTo(screenStartX, screenStartY);
+                this.ctx.lineTo(screenEndX, screenEndY);
+                this.ctx.stroke();
+                
+                // Simplified water droplets for performance
+                if (alpha > 0.5) {
+                    this.ctx.fillStyle = `rgba(150, 200, 255, ${alpha * 0.5})`;
+                    this.ctx.fillRect(screenEndX - 3, screenEndY - 3, 6, 6);
+                }
             }
         });
     }

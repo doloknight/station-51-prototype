@@ -415,48 +415,73 @@ class FireSimulation {
   }
 
   update(deltaTime) {
-    const newGrid = JSON.parse(JSON.stringify(this.grid));
+    // Performance optimization: only update every few frames
+    this.updateCounter = (this.updateCounter || 0) + 1;
+    if (this.updateCounter % 2 !== 0) return; // Skip every other update
     
+    // Only process cells that have fire or are adjacent to fire
+    const activeCells = new Set();
+    const cellsToUpdate = [];
+    
+    // Find all cells with fire and their neighbors
     for (let y = 0; y < this.height; y++) {
       for (let x = 0; x < this.width; x++) {
-        const cell = this.grid[y][x];
-        
-        if (cell.intensity > 0) {
-          // Fire consumes fuel and oxygen
-          newGrid[y][x].fuel = Math.max(0, cell.fuel - deltaTime * 0.1);
-          newGrid[y][x].oxygen = Math.max(0, cell.oxygen - deltaTime * 0.2);
-          
-          // Fire dies without fuel or oxygen
-          if (newGrid[y][x].fuel <= 0 || newGrid[y][x].oxygen <= 0) {
-            newGrid[y][x].intensity = Math.max(0, cell.intensity - deltaTime * 2);
-            newGrid[y][x].temperature = Math.max(20, cell.temperature - deltaTime * 30);
-          }
-          
-          // Fire spreads to neighbors
-          const neighbors = [
-            [x-1, y], [x+1, y], [x, y-1], [x, y+1]
-          ];
-          
-          neighbors.forEach(([nx, ny]) => {
-            if (this.isValidPosition(nx, ny)) {
-              const neighbor = this.grid[ny][nx];
-              if (neighbor.fuel > 0.1 && neighbor.oxygen > 0.1 && neighbor.intensity < 0.1) {
-                const heatTransfer = cell.intensity * deltaTime * 0.3;
-                newGrid[ny][nx].temperature += heatTransfer * 20;
-                if (newGrid[ny][nx].temperature > 60) {
-                  newGrid[ny][nx].intensity = Math.min(1, (newGrid[ny][nx].temperature - 60) / 40);
+        if (this.grid[y][x].intensity > 0.05) {
+          // Add this cell and all neighbors to update list
+          for (let dy = -1; dy <= 1; dy++) {
+            for (let dx = -1; dx <= 1; dx++) {
+              const nx = x + dx;
+              const ny = y + dy;
+              if (this.isValidPosition(nx, ny)) {
+                const key = `${nx},${ny}`;
+                if (!activeCells.has(key)) {
+                  activeCells.add(key);
+                  cellsToUpdate.push([nx, ny]);
                 }
               }
             }
-          });
-        } else {
-          // Cool down over time
-          newGrid[y][x].temperature = Math.max(20, cell.temperature - deltaTime * 5);
+          }
         }
       }
     }
     
-    this.grid = newGrid;
+    // Only update active cells for massive performance boost
+    cellsToUpdate.forEach(([x, y]) => {
+      const cell = this.grid[y][x];
+      
+      if (cell.intensity > 0.05) {
+        // Fire consumes fuel and oxygen
+        cell.fuel = Math.max(0, cell.fuel - deltaTime * 0.08);
+        cell.oxygen = Math.max(0, cell.oxygen - deltaTime * 0.15);
+        
+        // Fire dies without fuel or oxygen
+        if (cell.fuel <= 0 || cell.oxygen <= 0) {
+          cell.intensity = Math.max(0, cell.intensity - deltaTime * 1.5);
+          cell.temperature = Math.max(20, cell.temperature - deltaTime * 25);
+        }
+        
+        // Simplified fire spread - only to direct neighbors
+        if (cell.intensity > 0.3) {
+          const neighbors = [[x-1, y], [x+1, y], [x, y-1], [x, y+1]];
+          
+          neighbors.forEach(([nx, ny]) => {
+            if (this.isValidPosition(nx, ny)) {
+              const neighbor = this.grid[ny][nx];
+              if (neighbor.fuel > 0.2 && neighbor.oxygen > 0.2 && neighbor.intensity < 0.1) {
+                const heatTransfer = cell.intensity * deltaTime * 0.2;
+                neighbor.temperature += heatTransfer * 15;
+                if (neighbor.temperature > 70) {
+                  neighbor.intensity = Math.min(0.6, (neighbor.temperature - 70) / 30);
+                }
+              }
+            }
+          });
+        }
+      } else if (cell.temperature > 25) {
+        // Cool down over time
+        cell.temperature = Math.max(20, cell.temperature - deltaTime * 3);
+      }
+    });
   }
 
   getIntensityAt(x, y) {
@@ -850,15 +875,21 @@ io.on('connection', (socket) => {
   });
 });
 
-// Game loop
+// Game loop - reduced frequency for better performance
 setInterval(() => {
   games.forEach(game => {
     game.update();
+  });
+}, 1000 / 10); // 10 FPS for game logic
+
+// Separate slower network updates
+setInterval(() => {
+  games.forEach(game => {
     if (game.state === 'playing') {
       game.broadcast('gameStateUpdate', game.getGameState());
     }
   });
-}, 1000 / 30); // 30 FPS
+}, 1000 / 5); // 5 FPS for network updates
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
