@@ -92,7 +92,7 @@
             text-align: center;
         }
 
-        #joinForm input {
+        #joinForm input, #joinForm select {
             padding: 10px;
             margin: 10px;
             font-size: 16px;
@@ -100,6 +100,12 @@
             background: #333;
             color: white;
             border-radius: 5px;
+            min-width: 250px;
+        }
+
+        #joinForm select option {
+            background: #333;
+            color: white;
         }
 
         #joinForm button {
@@ -323,6 +329,19 @@
         <div id="joinForm">
             <h1 class="logo">STATION 51</h1>
             <p>Co-operative Firefighting Action</p>
+            <select id="playerRank">
+                <option value="">Select Rank</option>
+                <option value="REC">REC - Recruit</option>
+                <option value="PTE">PTE - Private</option>
+                <option value="LCP">LCP - Lance Corporal</option>
+                <option value="Lunch Corporal">Lunch Corporal</option>
+                <option value="SGT">SGT - Sergeant</option>
+                <option value="WO1">WO1 - Warrant Officer Class 1</option>
+                <option value="WO2">WO2 - Warrant Officer Class 2</option>
+                <option value="LTC">LTC - Lieutenant Colonel</option>
+                <option value="LTA">LTA - Lieutenant</option>
+            </select>
+            <br>
             <input type="text" id="playerName" placeholder="Enter your firefighter name" maxlength="20">
             <br>
             <input type="text" id="gameId" placeholder="Game ID (leave empty for new game)">

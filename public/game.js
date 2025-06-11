@@ -994,16 +994,24 @@ class Game {
 
 // Global functions for HTML callbacks
 function joinLobby() {
+    const playerRank = document.getElementById('playerRank').value;
     const playerName = document.getElementById('playerName').value.trim();
     const gameId = document.getElementById('gameId').value.trim();
+    
+    if (!playerRank) {
+        alert('Please select your rank');
+        return;
+    }
     
     if (!playerName) {
         alert('Please enter your firefighter name');
         return;
     }
     
+    const fullName = `${playerRank} ${playerName}`;
+    
     game.socket.emit('joinLobby', {
-        playerName: playerName,
+        playerName: fullName,
         gameId: gameId || null
     });
 }

@@ -86,7 +86,10 @@ class Game {
     if (!player) return false;
     
     const roleLimits = { 'pump-operator': 1, 'section-commander': 1, 'firefighter': 2 };
-    const currentCount = Array.from(this.lobbyPlayers.values()).filter(p => p.role === role).length;
+    
+    // Count current players in the target role, excluding the current player
+    const currentCount = Array.from(this.lobbyPlayers.values())
+      .filter(p => p.role === role && p.id !== playerId).length;
     
     if (currentCount >= roleLimits[role]) {
       return false; // Role is full
