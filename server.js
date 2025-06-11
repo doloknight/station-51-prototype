@@ -423,8 +423,12 @@ class FireSimulation {
     if (this.updateCounter % 2 !== 0) return; // Skip every other update
     
     // Only process cells that have fire or are adjacent to fire
-    const activeCells = new Set();
-    const cellsToUpdate = [];
+    if (!this.activeCells) this.activeCells = new Set();
+    if (!this.cellsToUpdate) this.cellsToUpdate = [];
+    
+    // Clear and reuse existing arrays/sets for better memory management
+    this.activeCells.clear();
+    this.cellsToUpdate.length = 0;
     
     // Find all cells with fire and their neighbors
     for (let y = 0; y < this.height; y++) {
@@ -437,9 +441,9 @@ class FireSimulation {
               const ny = y + dy;
               if (this.isValidPosition(nx, ny)) {
                 const key = `${nx},${ny}`;
-                if (!activeCells.has(key)) {
-                  activeCells.add(key);
-                  cellsToUpdate.push([nx, ny]);
+                if (!this.activeCells.has(key)) {
+                  this.activeCells.add(key);
+                  this.cellsToUpdate.push([nx, ny]);
                 }
               }
             }
@@ -449,7 +453,7 @@ class FireSimulation {
     }
     
     // Only update active cells for massive performance boost
-    cellsToUpdate.forEach(([x, y]) => {
+    this.cellsToUpdate.forEach(([x, y]) => {
       const cell = this.grid[y][x];
       
       if (cell.intensity > 0.05) {
@@ -594,48 +598,6 @@ io.on('connection', (socket) => {
     players.delete(socket.id);
   });
 
-  socket.on('joinGame', (data) => {
-    // Legacy support for direct game joining
-    const { gameId, playerName } = data;
-    
-    let game;
-    if (gameId && games.has(gameId)) {
-      game = games.get(gameId);
-    } else {
-      // Create new game
-      const newGameId = uuidv4();
-      game = new Game(newGameId);
-      games.set(newGameId, game);
-    }
-    
-    if (game.addPlayer(socket.id, socket)) {
-      players.set(socket.id, { gameId: game.id, playerName });
-      socket.join(game.id);
-      
-      socket.emit('gameJoined', {
-        gameId: game.id,
-        playerId: socket.id,
-        gameState: game.getGameState()
-      });
-      
-      game.broadcast('playerJoined', {
-        playerId: socket.id,
-        playerName: playerName
-      });
-      
-      // Start game if enough players
-      if (game.players.size >= 1 && game.state === 'lobby') {
-        setTimeout(() => {
-          if (game.startGame()) {
-            game.broadcast('gameStarted', game.getGameState());
-          }
-        }, 2000);
-      }
-    } else {
-      socket.emit('error', { message: 'Game is full' });
-    }
-  });
-  
   socket.on('playerMove', (data) => {
     const playerInfo = players.get(socket.id);
     if (!playerInfo) return;
@@ -723,14 +685,7 @@ io.on('connection', (socket) => {
     if (!player) return;
     
     if (player.hose.connected) {
-      // Disconnect hose
-      player.hose.connected = false;
-      player.hose.connectionPoint = null;
-      player.hose.connectionType = null;
-      player.hose.segments = [];
-      player.hose.waterPressure = 0;
-      
-      // Free up connection point
+      // Free up connection point before disconnecting
       if (player.hose.connectionType === 'truck') {
         const connection = game.fireTruck.hoseConnections.find(c => c.playerId === socket.id);
         if (connection) {
@@ -738,6 +693,13 @@ io.on('connection', (socket) => {
           connection.playerId = null;
         }
       }
+      
+      // Disconnect hose
+      player.hose.connected = false;
+      player.hose.connectionPoint = null;
+      player.hose.connectionType = null;
+      player.hose.segments = [];
+      player.hose.waterPressure = 0;
     } else {
       // Try to connect to nearest fire truck or hydrant
       const connectionDistance = 50;

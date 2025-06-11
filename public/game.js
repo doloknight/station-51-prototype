@@ -104,6 +104,47 @@ class Game {
         this.socket.on('error', (data) => {
             alert(data.message);
         });
+
+        // Add missing socket handlers for hose synchronization
+        this.socket.on('hoseConnectionToggled', (data) => {
+            if (this.gameState && this.gameState.players) {
+                const player = this.gameState.players.find(p => p.id === data.playerId);
+                if (player && player.hose) {
+                    player.hose.connected = data.connected;
+                    player.hose.connectionType = data.connectionType;
+                }
+            }
+        });
+
+        this.socket.on('hoseExtended', (data) => {
+            if (this.gameState && this.gameState.players) {
+                const player = this.gameState.players.find(p => p.id === data.playerId);
+                if (player && player.hose) {
+                    player.hose.segments = data.segments;
+                }
+            }
+        });
+
+        this.socket.on('hoseRetracted', (data) => {
+            if (this.gameState && this.gameState.players) {
+                const player = this.gameState.players.find(p => p.id === data.playerId);
+                if (player && player.hose) {
+                    player.hose.segments = data.segments;
+                }
+            }
+        });
+
+        this.socket.on('waterRefilled', (data) => {
+            if (this.gameState && this.gameState.players) {
+                const player = this.gameState.players.find(p => p.id === data.playerId);
+                if (player) {
+                    player.water = data.waterLevel;
+                }
+                if (this.gameState.fireTruck) {
+                    this.gameState.fireTruck.waterLevel = data.truckWaterLevel;
+                }
+            }
+        });
     }
     
     setupInputHandlers() {
@@ -200,7 +241,7 @@ class Game {
                 dy *= 0.707;
             }
             
-            const deltaTime = 1/60; // Assume 60 FPS
+            const deltaTime = (Date.now() - this.lastUpdate) / 1000; // Use actual delta time
             const newX = player.x + dx * speed * deltaTime;
             const newY = player.y + dy * speed * deltaTime;
             
@@ -777,10 +818,9 @@ class Game {
         if (!this.gameState.players) return;
         
         const roleColors = {
-            axe: '#ff8844',
-            extinguisher: '#4488ff',
-            medic: '#44ff44',
-            engineer: '#ffff44'
+            'pump-operator': '#ffff44',
+            'section-commander': '#ff8844', 
+            'firefighter': '#4488ff'
         };
         
         this.gameState.players.forEach(player => {
@@ -816,11 +856,14 @@ class Game {
             this.ctx.fillStyle = '#4444ff';
             this.ctx.fillRect(screenX - 15, screenY + 18, 30 * (player.water / 100), 4);
             
-            // Role indicator
+            // Role indicator - show first letter of role type
             this.ctx.fillStyle = 'white';
             this.ctx.font = '8px monospace';
             this.ctx.textAlign = 'center';
-            this.ctx.fillText(player.role[0].toUpperCase(), screenX, screenY + 4);
+            let roleIndicator = 'F'; // Default firefighter
+            if (player.role === 'pump-operator') roleIndicator = 'P';
+            else if (player.role === 'section-commander') roleIndicator = 'C';
+            this.ctx.fillText(roleIndicator, screenX, screenY + 4);
         });
     }
     
@@ -880,7 +923,7 @@ class Game {
             players.forEach(player => {
                 const playerSpan = document.createElement('span');
                 playerSpan.className = 'role-player' + (player.id === this.playerId ? ' you' : '');
-                playerSpan.textContent = player.name || `Player ${player.id.substr(0, 4)}`;
+                playerSpan.textContent = player.name || `Player ${player.id.substring(0, 4)}`;
                 playersDiv.appendChild(playerSpan);
             });
             
