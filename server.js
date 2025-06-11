@@ -24,7 +24,8 @@ class Game {
   constructor(id) {
     this.id = id;
     this.players = new Map();
-    this.state = 'waiting'; // waiting, playing, ended
+    this.lobbyPlayers = new Map(); // For lobby management
+    this.state = 'lobby'; // lobby, playing, ended
     this.fire = new FireSimulation();
     this.civilians = [];
     this.structuralIntegrity = 100;
@@ -59,10 +60,125 @@ class Game {
     };
   }
 
+  addLobbyPlayer(playerId, socket, playerName) {
+    if (this.lobbyPlayers.size >= 4) return false;
+    
+    const lobbyPlayer = {
+      id: playerId,
+      socket: socket,
+      name: playerName,
+      role: null // Will be selected in lobby
+    };
+    
+    this.lobbyPlayers.set(playerId, lobbyPlayer);
+    return true;
+  }
+
+  removeLobbyPlayer(playerId) {
+    this.lobbyPlayers.delete(playerId);
+    if (this.lobbyPlayers.size === 0) {
+      games.delete(this.id);
+    }
+  }
+
+  setPlayerRole(playerId, role) {
+    const player = this.lobbyPlayers.get(playerId);
+    if (!player) return false;
+    
+    const roleLimits = { 'pump-operator': 1, 'section-commander': 1, 'firefighter': 2 };
+    const currentCount = Array.from(this.lobbyPlayers.values()).filter(p => p.role === role).length;
+    
+    if (currentCount >= roleLimits[role]) {
+      return false; // Role is full
+    }
+    
+    player.role = role;
+    return true;
+  }
+
+  canStartGame() {
+    if (this.lobbyPlayers.size !== 4) return false;
+    
+    const roleCounts = {
+      'pump-operator': 0,
+      'section-commander': 0,
+      'firefighter': 0
+    };
+    
+    this.lobbyPlayers.forEach(player => {
+      if (player.role) {
+        roleCounts[player.role]++;
+      }
+    });
+    
+    return roleCounts['pump-operator'] === 1 && 
+           roleCounts['section-commander'] === 1 && 
+           roleCounts['firefighter'] === 2;
+  }
+
+  startGameFromLobby() {
+    if (!this.canStartGame()) return false;
+    
+    // Convert lobby players to game players
+    const spawnPositions = [
+      { x: 150, y: 450 }, // Near fire truck
+      { x: 180, y: 450 },
+      { x: 210, y: 450 },
+      { x: 240, y: 450 }
+    ];
+    
+    let positionIndex = 0;
+    this.lobbyPlayers.forEach(lobbyPlayer => {
+      const position = spawnPositions[positionIndex++];
+      const player = {
+        id: lobbyPlayer.id,
+        socket: lobbyPlayer.socket,
+        name: lobbyPlayer.name,
+        x: position.x,
+        y: position.y,
+        role: lobbyPlayer.role,
+        health: 100,
+        water: 100,
+        isAlive: true,
+        hose: {
+          connected: false,
+          connectionPoint: null,
+          connectionType: null,
+          segments: [],
+          maxLength: 300,
+          strained: false,
+          waterPressure: 0
+        }
+      };
+      
+      this.players.set(lobbyPlayer.id, player);
+    });
+    
+    this.lobbyPlayers.clear();
+    this.state = 'playing';
+    this.startTime = Date.now();
+    this.initializeFire();
+    this.spawnCivilians();
+    return true;
+  }
+
+  getLobbyState() {
+    return {
+      id: this.id,
+      state: this.state,
+      players: Array.from(this.lobbyPlayers.values()).map(p => ({
+        id: p.id,
+        name: p.name,
+        role: p.role
+      }))
+    };
+  }
+
   addPlayer(playerId, socket) {
+    // This is now only used for direct game joining (legacy)
     if (this.players.size >= 4) return false;
     
-    const roles = ['axe', 'extinguisher', 'medic', 'engineer'];
+    const roles = ['pump-operator', 'section-commander', 'firefighter', 'firefighter'];
     const usedRoles = Array.from(this.players.values()).map(p => p.role);
     const availableRoles = roles.filter(role => !usedRoles.includes(role));
     
@@ -71,7 +187,7 @@ class Game {
       socket: socket,
       x: 100 + this.players.size * 50,
       y: 100,
-      role: availableRoles[0] || 'axe',
+      role: availableRoles[0] || 'firefighter',
       health: 100,
       water: 100,
       isAlive: true,
@@ -98,6 +214,7 @@ class Game {
   }
 
   startGame() {
+    // Legacy method for direct game start
     if (this.players.size < 1) return false;
     this.state = 'playing';
     this.startTime = Date.now();
@@ -368,7 +485,89 @@ class FireSimulation {
 io.on('connection', (socket) => {
   console.log('Player connected:', socket.id);
   
+  socket.on('joinLobby', (data) => {
+    const { gameId, playerName } = data;
+    
+    let game;
+    if (gameId && games.has(gameId)) {
+      game = games.get(gameId);
+    } else {
+      // Create new game
+      const newGameId = uuidv4();
+      game = new Game(newGameId);
+      games.set(newGameId, game);
+    }
+    
+    if (game.state === 'lobby' && game.addLobbyPlayer(socket.id, socket, playerName)) {
+      players.set(socket.id, { gameId: game.id, playerName, inLobby: true });
+      socket.join(game.id);
+      
+      socket.emit('lobbyJoined', {
+        gameId: game.id,
+        playerId: socket.id,
+        lobbyState: game.getLobbyState()
+      });
+      
+      game.broadcast('lobbyUpdated', game.getLobbyState());
+    } else {
+      socket.emit('error', { message: 'Lobby is full or game already started' });
+    }
+  });
+
+  socket.on('selectRole', (data) => {
+    const playerInfo = players.get(socket.id);
+    if (!playerInfo || !playerInfo.inLobby) return;
+    
+    const game = games.get(playerInfo.gameId);
+    if (!game || game.state !== 'lobby') return;
+    
+    const { role } = data;
+    if (game.setPlayerRole(socket.id, role)) {
+      game.broadcast('lobbyUpdated', game.getLobbyState());
+    } else {
+      socket.emit('error', { message: 'Role is already full' });
+    }
+  });
+
+  socket.on('startGame', (data) => {
+    const playerInfo = players.get(socket.id);
+    if (!playerInfo || !playerInfo.inLobby) return;
+    
+    const game = games.get(playerInfo.gameId);
+    if (!game || game.state !== 'lobby') return;
+    
+    if (game.startGameFromLobby()) {
+      // Update player info to indicate they're now in game
+      game.players.forEach((player, playerId) => {
+        const playerInfo = players.get(playerId);
+        if (playerInfo) {
+          playerInfo.inLobby = false;
+        }
+      });
+      
+      game.broadcast('gameJoined', {
+        gameId: game.id,
+        gameState: game.getGameState()
+      });
+    } else {
+      socket.emit('error', { message: 'Cannot start game - not all roles filled' });
+    }
+  });
+
+  socket.on('leaveLobby', (data) => {
+    const playerInfo = players.get(socket.id);
+    if (!playerInfo || !playerInfo.inLobby) return;
+    
+    const game = games.get(playerInfo.gameId);
+    if (game) {
+      game.removeLobbyPlayer(socket.id);
+      game.broadcast('lobbyUpdated', game.getLobbyState());
+    }
+    players.delete(socket.id);
+  });
+
   socket.on('joinGame', (data) => {
+    // Legacy support for direct game joining
     const { gameId, playerName } = data;
     
     let game;
@@ -397,7 +596,7 @@ io.on('connection', (socket) => {
       });
       
       // Start game if enough players
-      if (game.players.size >= 1 && game.state === 'waiting') {
+      if (game.players.size >= 1 && game.state === 'lobby') {
         setTimeout(() => {
           if (game.startGame()) {
             game.broadcast('gameStarted', game.getGameState());
@@ -638,8 +837,13 @@ io.on('connection', (socket) => {
     if (playerInfo) {
       const game = games.get(playerInfo.gameId);
       if (game) {
-        game.removePlayer(socket.id);
-        game.broadcast('playerLeft', { playerId: socket.id });
+        if (playerInfo.inLobby) {
+          game.removeLobbyPlayer(socket.id);
+          game.broadcast('lobbyUpdated', game.getLobbyState());
+        } else {
+          game.removePlayer(socket.id);
+          game.broadcast('playerLeft', { playerId: socket.id });
+        }
       }
       players.delete(socket.id);
     }

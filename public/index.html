@@ -163,6 +163,159 @@
             font-weight: bold;
             text-shadow: 2px 2px 4px rgba(255, 68, 68, 0.5);
         }
+
+        #lobby {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.95);
+            padding: 30px;
+            border-radius: 10px;
+            border: 2px solid #ff4444;
+            width: 80%;
+            max-width: 800px;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+
+        #lobbyInfo {
+            text-align: center;
+            margin-bottom: 20px;
+            color: #ccc;
+        }
+
+        #roleSelection {
+            margin-bottom: 20px;
+        }
+
+        #roles {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-top: 15px;
+        }
+
+        .role-slot {
+            background: rgba(255, 255, 255, 0.05);
+            border: 2px solid #666;
+            border-radius: 8px;
+            padding: 15px;
+            transition: all 0.3s ease;
+        }
+
+        .role-slot.available {
+            border-color: #44ff44;
+            background: rgba(68, 255, 68, 0.1);
+        }
+
+        .role-slot.full {
+            border-color: #ff4444;
+            background: rgba(255, 68, 68, 0.1);
+        }
+
+        .role-slot.selected {
+            border-color: #ffaa00;
+            background: rgba(255, 170, 0, 0.2);
+        }
+
+        .role-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .role-header h4 {
+            margin: 0;
+            color: white;
+        }
+
+        .role-count {
+            background: #333;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+        .role-slot p {
+            color: #ccc;
+            font-size: 13px;
+            margin: 8px 0;
+            line-height: 1.4;
+        }
+
+        .role-players {
+            min-height: 20px;
+            margin: 8px 0;
+        }
+
+        .role-player {
+            background: #444;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            display: inline-block;
+            margin: 2px;
+            font-size: 12px;
+        }
+
+        .role-player.you {
+            background: #ffaa00;
+            color: black;
+        }
+
+        .role-btn {
+            background: #ff4444;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            width: 100%;
+        }
+
+        .role-btn:hover:not(:disabled) {
+            background: #ff6666;
+        }
+
+        .role-btn:disabled {
+            background: #666;
+            cursor: not-allowed;
+        }
+
+        #lobbyControls {
+            text-align: center;
+            border-top: 1px solid #666;
+            padding-top: 20px;
+        }
+
+        #lobbyControls button {
+            margin: 0 10px;
+            padding: 12px 24px;
+            font-size: 16px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+
+        #startGameBtn {
+            background: #44ff44;
+            color: black;
+            font-weight: bold;
+        }
+
+        #startGameBtn:disabled {
+            background: #666;
+            color: #999;
+            cursor: not-allowed;
+        }
+
+        #startGameBtn:hover:not(:disabled) {
+            background: #66ff66;
+        }
     </style>
 </head>
 <body>
@@ -174,7 +327,55 @@
             <br>
             <input type="text" id="gameId" placeholder="Game ID (leave empty for new game)">
             <br>
-            <button onclick="joinGame()">Join Game</button>
+            <button onclick="joinLobby()">Join Lobby</button>
+        </div>
+
+        <div id="lobby" style="display: none;">
+            <h1 class="logo">STATION 51 LOBBY</h1>
+            <div id="lobbyInfo">
+                <p>Game ID: <span id="lobbyGameId">-</span></p>
+                <p>Waiting for players to select roles and start mission...</p>
+            </div>
+            
+            <div id="roleSelection">
+                <h3>🚒 Select Your Role</h3>
+                <div id="roles">
+                    <div class="role-slot" data-role="pump-operator">
+                        <div class="role-header">
+                            <h4>🔧 Pump Operator</h4>
+                            <span class="role-count">0/1</span>
+                        </div>
+                        <p>Manages PL 511 water supply, pressure control, and hose connections</p>
+                        <div class="role-players"></div>
+                        <button class="role-btn" onclick="selectRole('pump-operator')">Select Role</button>
+                    </div>
+                    
+                    <div class="role-slot" data-role="section-commander">
+                        <div class="role-header">
+                            <h4>👨‍🚒 Section Commander</h4>
+                            <span class="role-count">0/1</span>
+                        </div>
+                        <p>Coordinates team strategy, rescue operations, and tactical decisions</p>
+                        <div class="role-players"></div>
+                        <button class="role-btn" onclick="selectRole('section-commander')">Select Role</button>
+                    </div>
+                    
+                    <div class="role-slot" data-role="firefighter">
+                        <div class="role-header">
+                            <h4>🔥 Fire Fighter</h4>
+                            <span class="role-count">0/2</span>
+                        </div>
+                        <p>Direct fire suppression, search and rescue, ventilation operations</p>
+                        <div class="role-players"></div>
+                        <button class="role-btn" onclick="selectRole('firefighter')">Select Role</button>
+                    </div>
+                </div>
+            </div>
+            
+            <div id="lobbyControls">
+                <button id="startGameBtn" onclick="startGame()" disabled>Start Mission</button>
+                <button onclick="leaveLobby()">Leave Lobby</button>
+            </div>
         </div>
 
         <canvas id="gameCanvas" width="800" height="600" style="display: none;"></canvas>

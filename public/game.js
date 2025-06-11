@@ -32,13 +32,30 @@ class Game {
     }
     
     setupSocketListeners() {
+        this.socket.on('lobbyJoined', (data) => {
+            console.log('Joined lobby:', data);
+            this.gameId = data.gameId;
+            this.playerId = data.playerId;
+            this.lobbyState = data.lobbyState;
+            
+            document.getElementById('joinForm').style.display = 'none';
+            document.getElementById('lobby').style.display = 'block';
+            
+            this.updateLobby();
+        });
+
+        this.socket.on('lobbyUpdated', (lobbyState) => {
+            this.lobbyState = lobbyState;
+            this.updateLobby();
+        });
+
         this.socket.on('gameJoined', (data) => {
             console.log('Joined game:', data);
             this.gameId = data.gameId;
             this.playerId = data.playerId;
             this.gameState = data.gameState;
             
-            document.getElementById('joinForm').style.display = 'none';
+            document.getElementById('lobby').style.display = 'none';
             document.getElementById('gameCanvas').style.display = 'block';
             document.getElementById('ui').style.display = 'block';
             document.getElementById('controls').style.display = 'block';
@@ -833,6 +850,73 @@ class Game {
         });
     }
     
+    updateLobby() {
+        if (!this.lobbyState) return;
+        
+        document.getElementById('lobbyGameId').textContent = this.gameId || '-';
+        
+        // Update role slots
+        const roles = ['pump-operator', 'section-commander', 'firefighter'];
+        const roleLimits = { 'pump-operator': 1, 'section-commander': 1, 'firefighter': 2 };
+        
+        roles.forEach(role => {
+            const roleSlot = document.querySelector(`[data-role="${role}"]`);
+            const players = this.lobbyState.players.filter(p => p.role === role);
+            const limit = roleLimits[role];
+            
+            // Update count
+            const countSpan = roleSlot.querySelector('.role-count');
+            countSpan.textContent = `${players.length}/${limit}`;
+            
+            // Update players list
+            const playersDiv = roleSlot.querySelector('.role-players');
+            playersDiv.innerHTML = '';
+            players.forEach(player => {
+                const playerSpan = document.createElement('span');
+                playerSpan.className = 'role-player' + (player.id === this.playerId ? ' you' : '');
+                playerSpan.textContent = player.name || `Player ${player.id.substr(0, 4)}`;
+                playersDiv.appendChild(playerSpan);
+            });
+            
+            // Update button and styling
+            const button = roleSlot.querySelector('.role-btn');
+            const currentPlayer = this.lobbyState.players.find(p => p.id === this.playerId);
+            
+            if (players.length >= limit) {
+                roleSlot.className = 'role-slot full';
+                button.disabled = true;
+                button.textContent = 'Role Full';
+            } else if (currentPlayer && currentPlayer.role === role) {
+                roleSlot.className = 'role-slot selected';
+                button.disabled = false;
+                button.textContent = 'Selected';
+            } else if (currentPlayer && currentPlayer.role && currentPlayer.role !== role) {
+                roleSlot.className = 'role-slot';
+                button.disabled = false;
+                button.textContent = 'Switch Role';
+            } else {
+                roleSlot.className = 'role-slot available';
+                button.disabled = false;
+                button.textContent = 'Select Role';
+            }
+        });
+        
+        // Update start button
+        const startBtn = document.getElementById('startGameBtn');
+        const totalPlayers = this.lobbyState.players.length;
+        const allRolesFilled = this.lobbyState.players.filter(p => p.role === 'pump-operator').length === 1 &&
+                              this.lobbyState.players.filter(p => p.role === 'section-commander').length === 1 &&
+                              this.lobbyState.players.filter(p => p.role === 'firefighter').length === 2;
+        
+        if (totalPlayers === 4 && allRolesFilled) {
+            startBtn.disabled = false;
+            startBtn.textContent = 'Start Mission';
+        } else {
+            startBtn.disabled = true;
+            startBtn.textContent = `Waiting for players (${totalPlayers}/4)`;
+        }
+    }
+
     updateUI() {
         if (!this.gameState) return;
         
@@ -903,7 +987,7 @@ class Game {
 }
 
 // Global functions for HTML callbacks
-function joinGame() {
+function joinLobby() {
     const playerName = document.getElementById('playerName').value.trim();
     const gameId = document.getElementById('gameId').value.trim();
     
@@ -912,10 +996,23 @@ function joinGame() {
         return;
     }
     
-    game.socket.emit('joinGame', {
+    game.socket.emit('joinLobby', {
         playerName: playerName,
         gameId: gameId || null
     });
+}
+
+function selectRole(role) {
+    game.socket.emit('selectRole', { role: role });
+}
+
+function startGame() {
+    game.socket.emit('startGame');
+}
+
+function leaveLobby() {
+    game.socket.emit('leaveLobby');
+    location.reload();
 }
 
 function returnToLobby() {
