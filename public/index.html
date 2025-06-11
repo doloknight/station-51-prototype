@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Station 51 - Co-op Firefighting</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #1a1a1a;
+            color: white;
+            font-family: 'Courier New', monospace;
+            overflow: hidden;
+        }
+
+        #gameContainer {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        #gameCanvas {
+            border: 2px solid #ff4444;
+            background: #2a2a2a;
+            display: block;
+            margin: 0 auto;
+        }
+
+        #ui {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 100;
+        }
+
+        #status {
+            background: rgba(0, 0, 0, 0.8);
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 10px;
+        }
+
+        #playerInfo {
+            background: rgba(0, 0, 0, 0.8);
+            padding: 10px;
+            border-radius: 5px;
+        }
+
+        .bar {
+            width: 200px;
+            height: 20px;
+            background: #333;
+            border: 1px solid #666;
+            margin: 5px 0;
+            position: relative;
+        }
+
+        .bar-fill {
+            height: 100%;
+            transition: width 0.3s ease;
+        }
+
+        .health-bar { background: #ff4444; }
+        .water-bar { background: #4444ff; }
+        .structure-bar { background: #ffaa44; }
+
+        .bar-text {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: bold;
+            color: white;
+            text-shadow: 1px 1px 2px black;
+        }
+
+        #joinForm {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.9);
+            padding: 30px;
+            border-radius: 10px;
+            border: 2px solid #ff4444;
+            text-align: center;
+        }
+
+        #joinForm input {
+            padding: 10px;
+            margin: 10px;
+            font-size: 16px;
+            border: 1px solid #666;
+            background: #333;
+            color: white;
+            border-radius: 5px;
+        }
+
+        #joinForm button {
+            padding: 10px 20px;
+            margin: 10px;
+            font-size: 16px;
+            background: #ff4444;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+
+        #joinForm button:hover {
+            background: #ff6666;
+        }
+
+        #controls {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 12px;
+        }
+
+        #gameEndModal {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.9);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 200;
+        }
+
+        #gameEndContent {
+            background: #1a1a1a;
+            padding: 30px;
+            border-radius: 10px;
+            border: 2px solid #ff4444;
+            text-align: center;
+            min-width: 300px;
+        }
+
+        .victory { border-color: #44ff44 !important; }
+        .defeat { border-color: #ff4444 !important; }
+
+        h1 {
+            color: #ff4444;
+            text-align: center;
+            margin: 0 0 20px 0;
+        }
+
+        .logo {
+            font-size: 48px;
+            font-weight: bold;
+            text-shadow: 2px 2px 4px rgba(255, 68, 68, 0.5);
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <div id="joinForm">
+            <h1 class="logo">STATION 51</h1>
+            <p>Co-operative Firefighting Action</p>
+            <input type="text" id="playerName" placeholder="Enter your firefighter name" maxlength="20">
+            <br>
+            <input type="text" id="gameId" placeholder="Game ID (leave empty for new game)">
+            <br>
+            <button onclick="joinGame()">Join Game</button>
+        </div>
+
+        <canvas id="gameCanvas" width="800" height="600" style="display: none;"></canvas>
+
+        <div id="ui" style="display: none;">
+            <div id="status">
+                <div>Game ID: <span id="currentGameId">-</span></div>
+                <div>Players: <span id="playerCount">0</span>/4</div>
+                <div>Time: <span id="timeRemaining">5:00</span></div>
+                <div>Status: <span id="gameStatus">Waiting</span></div>
+            </div>
+
+            <div id="playerInfo">
+                <div>Role: <span id="playerRole">-</span></div>
+                <div>Health:
+                    <div class="bar">
+                        <div class="bar-fill health-bar" id="healthBar" style="width: 100%"></div>
+                        <div class="bar-text" id="healthText">100/100</div>
+                    </div>
+                </div>
+                <div>Water:
+                    <div class="bar">
+                        <div class="bar-fill water-bar" id="waterBar" style="width: 100%"></div>
+                        <div class="bar-text" id="waterText">100/100</div>
+                    </div>
+                </div>
+                <div>Structure:
+                    <div class="bar">
+                        <div class="bar-fill structure-bar" id="structureBar" style="width: 100%"></div>
+                        <div class="bar-text" id="structureText">100/100</div>
+                    </div>
+                </div>
+                <div>Civilians: <span id="civilianCount">0</span> rescued</div>
+            </div>
+        </div>
+
+        <div id="controls" style="display: none;">
+            <strong>Controls:</strong><br>
+            WASD - Move<br>
+            Mouse - Aim water hose<br>
+            Click - Spray water<br>
+            Space - Rescue civilian<br>
+            R - Refill at hydrant
+        </div>
+
+        <div id="gameEndModal">
+            <div id="gameEndContent">
+                <h2 id="gameEndTitle">Game Over</h2>
+                <div id="gameEndStats"></div>
+                <button onclick="returnToLobby()">Return to Lobby</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="game.js"></script>
+</body>
+</html> 
