@@ -902,7 +902,15 @@ class Game {
     updateLobby() {
         if (!this.lobbyState) return;
         
-        document.getElementById('lobbyGameId').textContent = this.gameId || '-';
+        // Update share link
+        const shareLink = document.getElementById('shareLink');
+        if (this.gameId) {
+            const currentUrl = new URL(window.location);
+            currentUrl.searchParams.set('gameId', this.gameId);
+            shareLink.value = currentUrl.toString();
+        } else {
+            shareLink.value = 'Loading...';
+        }
         
         // Update role slots
         const roles = ['pump-operator', 'section-commander', 'firefighter'];
@@ -969,8 +977,16 @@ class Game {
     updateUI() {
         if (!this.gameState) return;
         
-        // Game status
-        document.getElementById('currentGameId').textContent = this.gameId || '-';
+        // Game status - update share link
+        const currentGameLink = document.getElementById('currentGameLink');
+        if (this.gameId) {
+            const currentUrl = new URL(window.location);
+            currentUrl.searchParams.set('gameId', this.gameId);
+            currentGameLink.value = currentUrl.toString();
+        } else {
+            currentGameLink.value = 'Loading...';
+        }
+        
         document.getElementById('playerCount').textContent = this.gameState.players ? this.gameState.players.length : 0;
         document.getElementById('gameStatus').textContent = this.gameState.state;
         
@@ -1076,8 +1092,89 @@ function returnToLobby() {
     location.reload();
 }
 
+function copyShareLink() {
+    const shareLink = document.getElementById('shareLink');
+    const copyStatus = document.getElementById('copyStatus');
+    
+    // Copy to clipboard
+    shareLink.select();
+    shareLink.setSelectionRange(0, 99999); // For mobile devices
+    
+    try {
+        document.execCommand('copy');
+        
+        // Show success message
+        copyStatus.style.display = 'block';
+        copyStatus.textContent = 'Link copied to clipboard!';
+        
+        // Hide message after 2 seconds
+        setTimeout(() => {
+            copyStatus.style.display = 'none';
+        }, 2000);
+        
+    } catch (err) {
+        // Fallback for modern browsers
+        navigator.clipboard.writeText(shareLink.value).then(() => {
+            copyStatus.style.display = 'block';
+            copyStatus.textContent = 'Link copied to clipboard!';
+            setTimeout(() => {
+                copyStatus.style.display = 'none';
+            }, 2000);
+        }).catch(() => {
+            copyStatus.style.display = 'block';
+            copyStatus.style.color = '#ff4444';
+            copyStatus.textContent = 'Failed to copy link';
+            setTimeout(() => {
+                copyStatus.style.display = 'none';
+                copyStatus.style.color = '#44ff44';
+            }, 2000);
+        });
+    }
+}
+
+function copyCurrentGameLink() {
+    const currentGameLink = document.getElementById('currentGameLink');
+    
+    // Copy to clipboard
+    currentGameLink.select();
+    currentGameLink.setSelectionRange(0, 99999);
+    
+    try {
+        document.execCommand('copy');
+        // Brief visual feedback
+        currentGameLink.style.background = '#004400';
+        setTimeout(() => {
+            currentGameLink.style.background = '#333';
+        }, 500);
+    } catch (err) {
+        navigator.clipboard.writeText(currentGameLink.value).then(() => {
+            currentGameLink.style.background = '#004400';
+            setTimeout(() => {
+                currentGameLink.style.background = '#333';
+            }, 500);
+        }).catch(() => {
+            currentGameLink.style.background = '#440000';
+            setTimeout(() => {
+                currentGameLink.style.background = '#333';
+            }, 500);
+        });
+    }
+}
+
+// Auto-populate game ID from URL parameters
+function getGameIdFromUrl() {
+    const urlParams = new URLSearchParams(window.location.search);
+    return urlParams.get('gameId');
+}
+
 // Start the game
 let game;
 document.addEventListener('DOMContentLoaded', () => {
     game = new Game();
+    
+    // Auto-populate game ID if present in URL
+    const gameIdFromUrl = getGameIdFromUrl();
+    if (gameIdFromUrl) {
+        document.getElementById('gameId').value = gameIdFromUrl;
+    }
 }); 
