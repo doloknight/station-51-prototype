@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: station-51-multiplayer
+    runtime: node
+    buildCommand: npm install
+    startCommand: npm start
+    plan: free
+    healthCheckPath: /
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000 
