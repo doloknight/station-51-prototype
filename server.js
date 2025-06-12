@@ -82,8 +82,14 @@ class Game {
   }
 
   setPlayerRole(playerId, role) {
+    console.log('setPlayerRole called for player:', playerId, 'role:', role);
     const player = this.lobbyPlayers.get(playerId);
-    if (!player) return false;
+    console.log('Found player in lobby:', player);
+    
+    if (!player) {
+      console.log('Player not found in lobby');
+      return false;
+    }
     
     const roleLimits = { 'pump-operator': 1, 'section-commander': 1, 'firefighter': 2 };
     
@@ -91,11 +97,16 @@ class Game {
     const currentCount = Array.from(this.lobbyPlayers.values())
       .filter(p => p.role === role && p.id !== playerId).length;
     
+    console.log('Current count for role', role, ':', currentCount, 'limit:', roleLimits[role]);
+    
     if (currentCount >= roleLimits[role]) {
+      console.log('Role is full');
       return false; // Role is full
     }
     
+    console.log('Setting player role from', player.role, 'to', role);
     player.role = role;
+    console.log('Role set successfully');
     return true;
   }
 
@@ -547,16 +558,33 @@ io.on('connection', (socket) => {
   });
 
   socket.on('selectRole', (data) => {
+    console.log('selectRole received from', socket.id, 'data:', data);
     const playerInfo = players.get(socket.id);
-    if (!playerInfo || !playerInfo.inLobby) return;
+    console.log('playerInfo:', playerInfo);
+    
+    if (!playerInfo || !playerInfo.inLobby) {
+      console.log('Player not found or not in lobby');
+      return;
+    }
     
     const game = games.get(playerInfo.gameId);
-    if (!game || game.state !== 'lobby') return;
+    console.log('game found:', game ? game.id : 'none');
+    
+    if (!game || game.state !== 'lobby') {
+      console.log('Game not found or not in lobby state');
+      return;
+    }
     
     const { role } = data;
+    console.log('Attempting to set role:', role, 'for player:', socket.id);
+    
     if (game.setPlayerRole(socket.id, role)) {
-      game.broadcast('lobbyUpdated', game.getLobbyState());
+      console.log('Role set successfully, broadcasting lobby update');
+      const lobbyState = game.getLobbyState();
+      console.log('Broadcasting lobbyState:', lobbyState);
+      game.broadcast('lobbyUpdated', lobbyState);
     } else {
+      console.log('Role setting failed - role full');
       socket.emit('error', { message: 'Role is already full' });
     }
   });

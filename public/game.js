@@ -45,6 +45,7 @@ class Game {
         });
 
         this.socket.on('lobbyUpdated', (lobbyState) => {
+            console.log('lobbyUpdated received:', lobbyState);
             this.lobbyState = lobbyState;
             this.updateLobby();
         });
@@ -900,7 +901,11 @@ class Game {
     }
     
     updateLobby() {
-        if (!this.lobbyState) return;
+        console.log('updateLobby called with lobbyState:', this.lobbyState);
+        if (!this.lobbyState) {
+            console.log('No lobbyState, returning');
+            return;
+        }
         
         // Update share link
         const shareLink = document.getElementById('shareLink');
@@ -1076,7 +1081,17 @@ function joinLobby() {
 }
 
 function selectRole(role) {
+    console.log('selectRole called with role:', role);
+    console.log('game object:', game);
+    console.log('game.socket:', game ? game.socket : 'undefined');
+    
+    if (!game || !game.socket) {
+        console.error('Game or socket not initialized');
+        return;
+    }
+    
     game.socket.emit('selectRole', { role: role });
+    console.log('selectRole event emitted');
 }
 
 function startGame() {
