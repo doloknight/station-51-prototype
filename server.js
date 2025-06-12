@@ -357,9 +357,17 @@ class Game {
   }
 
   broadcast(event, data) {
-    this.players.forEach(player => {
-      player.socket.emit(event, data);
-    });
+    // Broadcast to lobby players if in lobby state
+    if (this.state === 'lobby') {
+      this.lobbyPlayers.forEach(player => {
+        player.socket.emit(event, data);
+      });
+    } else {
+      // Broadcast to game players if in game state
+      this.players.forEach(player => {
+        player.socket.emit(event, data);
+      });
+    }
   }
 
   getGameState() {
